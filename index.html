@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sports & Leagues Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;6600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for webkit browsers */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9; /* gray-100 */
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #94a3b8; /* gray-400 */
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b; /* gray-500 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-900">Sports & Leagues Database</h1>
+            <p class="text-md text-gray-600 mt-2">All data is populated in real-time by the AI Collector</p>
+        </header>
+
+        <div class="flex flex-col md:flex-row gap-6">
+
+            <!-- Left Column: Sports List -->
+            <aside class="w-full md:w-1/3">
+                <div class="bg-white rounded-lg shadow-md h-full">
+                    <div class="p-4 border-b">
+                        <h2 class="text-xl font-semibold">Sports</h2>
+                    </div>
+                    <div id="sports-list-container" class="p-4 h-[60vh] overflow-y-auto custom-scrollbar">
+                        <!-- Loading State -->
+                        <div id="sports-loading" class="flex items-center justify-center h-full">
+                            <svg class="animate-spin mr-3 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Loading Sports...</span>
+                        </div>
+                        <!-- Sports list will be populated here -->
+                        <ul id="sports-list"></ul>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Right Column: Leagues List -->
+            <main class="w-full md:w-2/3">
+                <div class="bg-white rounded-lg shadow-md h-full">
+                    <div class="p-4 border-b">
+                        <h2 id="leagues-title" class="text-xl font-semibold">Leagues</h2>
+                    </div>
+                    <div id="leagues-list-container" class="p-4 h-[60vh] overflow-y-auto custom-scrollbar">
+                        <!-- Initial state / No sport selected -->
+                        <div id="leagues-initial-message" class="flex flex-col items-center justify-center h-full text-center text-gray-500">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-4 text-gray-400"><path d="m15 18-6-6 6-6"/></svg>
+                            <span>Select a sport from the list on the left to see its leagues.</span>
+                        </div>
+                        <!-- Leagues list will be populated here -->
+                         <ul id="leagues-list"></ul>
+                    </div>
+                </div>
+            </main>
+
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Configuration ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "YOUR_API_KEY", authDomain: "...", projectId: "..." };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- App Initialization ---
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // --- Authentication ---
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                console.log("User authenticated:", user.uid);
+                fetchAndDisplaySports();
+            }
+        });
+
+        (async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication failed:", error);
+                document.getElementById('sports-list-container').innerHTML = `<p class="text-red-500 text-center">Authentication failed. Cannot load data.</p>`;
+            }
+        })();
+
+        // --- Data Fetching and Rendering ---
+        
+        async function fetchAndDisplaySports() {
+            const sportsListUl = document.getElementById('sports-list');
+            const sportsLoadingDiv = document.getElementById('sports-loading');
+            const publicDataPath = `artifacts/${appId}/public/data`;
+            const sportsCollection = collection(db, publicDataPath, 'sports');
+
+            try {
+                const querySnapshot = await getDocs(sportsCollection);
+                sportsLoadingDiv.style.display = 'none';
+
+                if (querySnapshot.empty) {
+                    sportsListUl.innerHTML = `<li class="text-gray-500">No sports found in the database. Run the AI collector script.</li>`;
+                    return;
+                }
+                
+                const sports = [];
+                querySnapshot.forEach(doc => {
+                    sports.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Sort sports alphabetically by name
+                sports.sort((a, b) => a.name.localeCompare(b.name));
+
+                sports.forEach(sport => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<a href="#" class="block p-3 rounded-md hover:bg-gray-100 transition-colors">${sport.name}</a>`;
+                    li.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        // Highlight selected sport
+                        document.querySelectorAll('#sports-list li a').forEach(el => el.classList.remove('bg-blue-100', 'text-blue-700', 'font-semibold'));
+                        li.querySelector('a').classList.add('bg-blue-100', 'text-blue-700', 'font-semibold');
+                        
+                        displayLeaguesForSport(sport.id, sport.name);
+                    });
+                    sportsListUl.appendChild(li);
+                });
+
+            } catch (error) {
+                console.error("Error fetching sports:", error);
+                sportsLoadingDiv.innerHTML = `<p class="text-red-500 text-center">Error: Could not fetch sports. Check console for details.</p>`;
+            }
+        }
+        
+        async function displayLeaguesForSport(sportId, sportName) {
+            const leaguesListUl = document.getElementById('leagues-list');
+            const leaguesInitialMessage = document.getElementById('leagues-initial-message');
+            const leaguesTitle = document.getElementById('leagues-title');
+
+            leaguesTitle.textContent = `Leagues for ${sportName}`;
+            leaguesInitialMessage.style.display = 'none';
+            leaguesListUl.innerHTML = `
+                <div class="flex items-center justify-center h-full">
+                    <svg class="animate-spin mr-3 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Loading leagues...</span>
+                </div>`;
+
+            const publicDataPath = `artifacts/${appId}/public/data`;
+            const leaguesCollection = collection(db, publicDataPath, 'leagues');
+            const q = query(leaguesCollection, where("sportId", "==", sportId));
+
+            try {
+                const querySnapshot = await getDocs(q);
+                
+                if (querySnapshot.empty) {
+                    leaguesListUl.innerHTML = `<li class="text-gray-500 text-center">No leagues found for ${sportName}. The AI hasn't added any yet.</li>`;
+                    return;
+                }
+                
+                // Clear loading spinner
+                leaguesListUl.innerHTML = '';
+                
+                querySnapshot.forEach(doc => {
+                    const league = doc.data();
+                    const li = document.createElement('li');
+                    li.className = 'p-4 border-b last:border-b-0';
+                    li.innerHTML = `
+                        <h3 class="font-semibold text-lg">${league.name}</h3>
+                        ${league.country ? `<p class="text-sm text-gray-600">${league.country}</p>` : ''}
+                    `;
+                    leaguesListUl.appendChild(li);
+                });
+            } catch (error) {
+                console.error("Error fetching leagues:", error);
+                leaguesListUl.innerHTML = `<li class="text-red-500 text-center">Error: Could not fetch leagues.</li>`;
+            }
+        }
+    </script>
+</body>
+</html>
+
